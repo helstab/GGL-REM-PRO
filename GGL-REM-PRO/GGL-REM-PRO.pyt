@@ -536,7 +536,7 @@ class REM(object):
                 arcpy.CopyRows_management(ggl_table, "ggl_table_custom")
                 arcpy.JoinField_management(crosssections, "LOCATION", "ggl_table_custom", "LOCATION", ggl_field)
                 arcpy.PolylineToRaster_conversion(crosssections, ggl_field, gglrem_name + "_GGL_RASTER_Custom", "", "", "1")
-                arcpy.Minus_3d(lidar, "Custom", gglrem_name + "_GGL_REM_Custom")
+                arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Custom", gglrem_name + "_GGL_REM_Custom")
                 fc_Custom_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Custom_m")
                 aprxMap.addDataFromPath(fc_Custom_Float_m_path)
 
