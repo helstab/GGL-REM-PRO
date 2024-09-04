@@ -404,7 +404,7 @@ class CenterlineStations(object):
         #Build Structured Array
         ##Set Data Types
         arcpy.AddMessage("Almost Done...")
-        dt = {'names':['LOCATION','LIDAR', 'LINEAR', 'POLY2', 'POLY3', 'POLY4', 'POLY5'], 'formats':[np.int, np.float32, np.float32, np.float32, np.float32, np.float32, np.float32]}
+        dt = {'names':['LOCATION','LIDAR', 'LINEAR', 'POLY2', 'POLY3', 'POLY4', 'POLY5'], 'formats':[np.int64, np.float32, np.float32, np.float32, np.float32, np.float32, np.float32]}
 
         ##Build Blank Structured Array
         poly = np.zeros(len(px), dtype=dt)
