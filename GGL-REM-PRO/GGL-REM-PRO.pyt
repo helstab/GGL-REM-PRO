@@ -13,15 +13,16 @@
 #
 # Copyright:   (c) jmhelstab 2018
 # Licence:     GNU General Public License v3.0
+#
+# Updates by DDH (ddh@geodata.soton.ac.uk)
+#   24/1/25 - Removed unused modules, variables and corrected toolbox alias
 #-------------------------------------------------------------------------------
 
 #Import Modules
 import arcpy
 import os
-import sys
 from arcpy.sa import *
 import numpy as np
-import pandas as pd
 
 #Define Toolboxs
 class Toolbox(object):
@@ -29,7 +30,7 @@ class Toolbox(object):
         """Define the toolbox (the name of the toolbox is the name of the
         .pyt file)."""
         self.label = "GGL-REM-PRO Toolbox"
-        self.alias = "GGL-REM-PRO"
+        self.alias = "GGLREMPRO"
 
         # List of tool classes associated with this toolbox
         self.tools = [Centerline, CrossSections, CenterlineStations, REM]
@@ -165,8 +166,6 @@ class CrossSections(object):
             parameterType = "Required",
             direction = "Input")
 
-        
-
         params = [inFC, routeID, stationDirection, widthVB]
         return params
 
@@ -201,7 +200,6 @@ class CrossSections(object):
         draw_dir = parameters[2].valueAsText
         o_left = parameters[3].value/2
         o_right = parameters[3].value/2
-        length_id = "LOCATION"
         fc_routed = "Routed_" + route_id
         off_table = "Offset_Table_" + route_id
         merged = "Merged_" + route_id
@@ -233,7 +231,6 @@ class CrossSections(object):
         fields_centerline = ['shape_length', 'shape_Length', 'shape_LENGTH', 'Shape_length', 'Shape_Length', 'Shape_LENGTH', 'SHAPE_length', 'SHAPE_Length', 'SHAPE_LENGTH',]
         LOCATION1 = arcpy.da.SearchCursor(fc_routed, fields_centerline,).next()[0]
         LENGTH = int(LOCATION1)
-        LOCATION2 = range(1,LENGTH)
 
         NAME =  arcpy.da.SearchCursor(fc_in, route_field,)
         NAME = [NAME] * LENGTH
@@ -577,4 +574,4 @@ class REM(object):
 
         arcpy.AddMessage("KEEP ASKING QUESTIONS!")
 
-        return   
+        return
