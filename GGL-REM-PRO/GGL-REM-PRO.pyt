@@ -137,6 +137,8 @@ class Centerline(object):
 # 24/1/25 - Now uses AddFields to bulk create fields
 # 24/1/25 - Better use of cursors
 # 24/1/25 - Better filtering of parameters
+# 27/1/25 - Parameter zero checks that input layer has only 1 feature in it, otherwise it rejects the layer.
+# 27/1/25 - Loads route ID as a single value as layer will always have a single feature
 class CrossSections(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -208,14 +210,29 @@ class CrossSections(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
-        if parameters[0].value:
-            with arcpy.da.SearchCursor(parameters[0].valueAsText, 'ROUTEID') as rows:
-                parameters[1].filter.list = sorted(list(set([row[0] for row in rows])))
-        else:
-            parameters[1].filter.list = []
+        if parameters[0].altered:
+            resObj = arcpy.GetCount_management(parameters[0].valueAsText)
+            n = int(resObj.getOutput(0))
+            if n == 1:
+                # As layer only has one feature it will have only one route ID.
+                with arcpy.da.SearchCursor(parameters[0].valueAsText, 'ROUTEID') as cursor:
+                    for row in cursor:
+                        if row[0] not in [None, "", "<Null>"]:
+                            parameters[1].value = row[0]
         return
 
     def updateMessages(self, parameters):
+        if parameters[0].altered:
+            resObj = arcpy.GetCount_management(parameters[0].valueAsText)
+            n = int(resObj.getOutput(0))
+            if n == 1:
+                parameters[0].clearMessage()
+                if parameters[1].altered == False:
+                     parameters[1].setWarningMessage("Route ID is invalid, must be a non-null value.")
+            else:
+                 # Report error
+                 parameters[0].setErrorMessage("Centreline layer must contain only 1 polyline with a route ID!")
+
         if parameters[3].altered:
             if parameters[3].value <= 0:
                 parameters[3].setErrorMessage('''Offset Value must be greater than zero.''')
@@ -296,6 +313,8 @@ class CrossSections(object):
 # Create Centerline Stations Tool Parameters
 # 24/1/25 - Created output parameter and dropped requirement for map object, allows modelbuilder connectivity.
 # 24/1/25 - Better filtering of parameters
+# 27/1/25 - Build GGL now steps through cursor once
+# 27/1/25 - Join Field tool now builds indices to improve join performance
 class CenterlineStations(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -402,8 +421,12 @@ class CenterlineStations(object):
         arcpy.Delete_management("xsec2")
 
         arcpy.AddMessage("... Building GGL")
-        px = [row[0] for row in arcpy.da.SearchCursor(stations, "LOCATION")]
-        py = [row[0] for row in arcpy.da.SearchCursor(stations, "RASTERVALU")]
+        px = list()
+        py = list()
+        with arcpy.da.SearchCursor(stations, ["LOCATION", "RASTERVALU"]) as cursor:
+             for row in cursor:
+                  px.append(row[0])
+                  py.append(row[1])
 
         #Linear Model
         arcpy.AddMessage("... LINEAR")
@@ -455,8 +478,8 @@ class CenterlineStations(object):
 
         #Join Model Output to Cross Sections and Centerline Stations Feature Classes
         arcpy.AddMessage("... Joining Modeled Values to Features")
-        arcpy.management.JoinField(stations, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None)
-        arcpy.management.JoinField(crosssection, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None)
+        arcpy.management.JoinField(stations, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
+        arcpy.management.JoinField(crosssection, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
 
         #Add Layers
         arcpy.env.addOutputsToMap = True
