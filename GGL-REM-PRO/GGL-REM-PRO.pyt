@@ -139,6 +139,7 @@ class Centerline(object):
 # 24/1/25 - Better filtering of parameters
 # 27/1/25 - Parameter zero checks that input layer has only 1 feature in it, otherwise it rejects the layer.
 # 27/1/25 - Loads route ID as a single value as layer will always have a single feature
+# 30/1/25 - Delete Temporary Features now correctly deletes Merged table, which has now been made an in-memory dataset
 class CrossSections(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -249,7 +250,7 @@ class CrossSections(object):
         o_right = parameters[3].value/2
         fc_routed = "Routed_" + route_id
         off_table = "Offset_Table_" + route_id
-        merged = "Merged_" + route_id
+        merged = "memory/Merged_" + route_id
         x_sec = "CrossSections_" + route_id
         desc = arcpy.Describe(fc_in)
         gdb = desc.path
@@ -300,7 +301,7 @@ class CrossSections(object):
 
         #Delete Temporary Features
         arcpy.AddMessage("... Deleting temporary datasets")
-        arcpy.Delete_management(["merged", "leftoff", "rightoff"])
+        arcpy.Delete_management([merged, "leftoff", "rightoff"])
 
         #Add Layers to Map
         arcpy.env.addOutputsToMap = True
@@ -315,6 +316,7 @@ class CrossSections(object):
 # 24/1/25 - Better filtering of parameters
 # 27/1/25 - Build GGL now steps through cursor once
 # 27/1/25 - Join Field tool now builds indices to improve join performance
+# 30/1/25 - Pairwise intersect and MP2SP now write to in-memory, Delete datasets updated to a list
 class CenterlineStations(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -410,15 +412,17 @@ class CenterlineStations(object):
 
         # Create cross station points from interscetion of route with cross sections
         arcpy.AddMessage("... Intersecting Centerline and Cross Section Polylines")
-        arcpy.analysis.PairwiseIntersect(inFeatures, "xsec", "", "", "POINT")
+        arcpy.analysis.PairwiseIntersect(inFeatures, "memory/xsec", "", "", "POINT")
         arcpy.AddMessage("... Exploding into single part geometry")
-        arcpy.MultipartToSinglepart_management("xsec", "xsec2")
+        arcpy.MultipartToSinglepart_management("memory/xsec", "memory/xsec2")
 
         #Extract elevation data from DEM to Centerline Station Points
         arcpy.AddMessage("... Extracting Elevation Values")
-        arcpy.sa.ExtractValuesToPoints("xsec2", raster, stations, "INTERPOLATE")
-        arcpy.Delete_management("xsec")
-        arcpy.Delete_management("xsec2")
+        arcpy.sa.ExtractValuesToPoints("memory/xsec2", raster, stations, "INTERPOLATE")
+
+        # Kill off in-memory layers
+        arcpy.Delete_management("... Deleting in-memory layers")
+        arcpy.Delete_management(["memory/xsec", "memory/xsec2"])
 
         arcpy.AddMessage("... Building GGL")
         px = list()
