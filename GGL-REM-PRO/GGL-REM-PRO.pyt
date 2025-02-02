@@ -141,6 +141,7 @@ class Centerline(object):
 # 27/1/25 - Loads route ID as a single value as layer will always have a single feature
 # 30/1/25 - Delete Temporary Features now correctly deletes Merged table, which has now been made an in-memory dataset
 # 31/1/25 - Removed filter off parameter 1 as now not needed.
+# 1/2/25  - Explicity set schema of output parameters so now works correctly in modelbuilder.
 class CrossSections(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -149,6 +150,24 @@ class CrossSections(object):
         self.canRunInBackground = False
 
     def getParameterInfo(self):
+        # Create field objects to be used in setting output schema for paramOut1 and paramOut2
+        F0 = arcpy.Field()
+        F0.name = "OBJECTID"
+        F0.type = "OID"
+        F1 = arcpy.Field()
+        F1.name = "Shape"
+        F1.type = "Geometry"
+        F2= arcpy.Field()
+        F2.name = "ROUTEID"
+        F2.type = "String"
+        F2.length =50
+        F3 = arcpy.Field()
+        F3.name = "Shape_Length"
+        F3.type = "Double"
+        F4 = arcpy.Field()
+        F4.name = "LOCATION"
+        F4.type = "Integer"
+
         #First parameter [0]
         inFC = arcpy.Parameter(
             displayName = "Input Centerline Feature Class",
@@ -188,17 +207,30 @@ class CrossSections(object):
         paramOut1 = arcpy.Parameter(
             displayName="Output Route Feature Class",
             name="out_Route",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Derived",
             direction="Output")
-        
+        paramOut1.schema.geometryTypeRule="AsSpecified"
+        paramOut1.schema.geometryType = "Polyline"
+        paramOut1.schema.featureTypeRule="AsSpecified"
+        paramOut1.schema.featureType = "Simple"
+        paramOut1.schema.fieldsRule = "None"
+        paramOut1.schema.additionalFields = [F0, F1, F2, F3]
+
         # Output cross sections [5]
         paramOut2 = arcpy.Parameter(
             displayName="Output Cross section Feature Class",
             name="out_XS",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Derived",
             direction="Output")
+        paramOut2.schema.geometryTypeRule="AsSpecified"
+        paramOut2.schema.geometryType = "Polyline"
+        paramOut2.schema.featureTypeRule="AsSpecified"
+        paramOut2.schema.featureType = "Simple"
+        paramOut2.schema.fieldsRule = "None"
+        paramOut2.schema.additionalFields = [F0, F1, F3, F4]
+
         params = [inFC, routeID, stationDirection, widthVB, paramOut1, paramOut2]
         return params
 
@@ -210,6 +242,7 @@ class CrossSections(object):
         """Modify the values and properties of parameters before internal
         validation is performed.  This method is called whenever a parameter
         has been changed."""
+
         if parameters[0].altered:
             resObj = arcpy.GetCount_management(parameters[0].valueAsText)
             n = int(resObj.getOutput(0))
@@ -219,6 +252,19 @@ class CrossSections(object):
                     for row in cursor:
                         if row[0] not in [None, "", "<Null>"]:
                             parameters[1].value = row[0]
+
+                # Set output featureclass name here, required by output schema for modelbuilder
+                fc_in = parameters[0].valueAsText
+                desc = arcpy.Describe(fc_in)
+                gdb = desc.path
+                # Parameter 4 output path
+                fc_routed = "Routed_" + row[0]
+                fc_routed_path = os.path.join(gdb, fc_routed)
+                parameters[4].value = fc_routed_path
+                # Parameter 5 output path
+                x_sec = "CrossSections_" + row[0]
+                fc_x_sec_path = os.path.join(gdb, x_sec)
+                parameters[5].value = fc_x_sec_path
         return
 
     def updateMessages(self, parameters):
@@ -317,6 +363,10 @@ class CrossSections(object):
 # 27/1/25 - Join Field tool now builds indices to improve join performance
 # 30/1/25 - Pairwise intersect and MP2SP now write to in-memory, Delete datasets updated to a list
 # 31/1/25 - Removed filter off parameter 1 as now not needed and now loads route ID as a single value as layer will always have a single feature
+# 2/2/25  - Deletes redudant FID fields created by intersection step, simplifies output schema.
+# 2/2/25  - Explicity set schema of output parameter so now works correctly in modelbuilder.
+# 2/2/25  - Exposes cross sections as output parameter to allow modelbuilder continuity
+# 2/2/25  - Add centreline layer as a parameter to the tool to avoid chicken & egg scenario within modelbuilder.
 class CenterlineStations(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -325,6 +375,55 @@ class CenterlineStations(object):
         self.canRunInBackground = False
 
     def getParameterInfo(self):
+        # Create field objects to be used in setting output schema for paramOut1 and paramOut2
+        F0 = arcpy.Field()
+        F0.name = "OBJECTID"
+        F0.type = "OID"
+        F1 = arcpy.Field()
+        F1.name = "Shape"
+        F1.type = "Geometry"
+        F2= arcpy.Field()
+        F2.name = "ROUTEID"
+        F2.type = "String"
+        F2.length =50
+        F3 = arcpy.Field()
+        F3.name = "Shape_Length"
+        F3.type = "Double"
+        F4 = arcpy.Field()
+        F4.name = "LOCATION"
+        F4.type = "Integer"
+        F5 = arcpy.Field()
+        F5.name = "RASTERVALU"
+        F5.type = "Double"
+        F6 = arcpy.Field()
+        F6.name = "LIDAR"
+        F6.type = "Double"
+        F7 = arcpy.Field()
+        F7.name = "LINEAR"
+        F7.type = "Double"
+        F8 = arcpy.Field()
+        F8.name = "POLY2"
+        F8.type = "Double"
+        F9 = arcpy.Field()
+        F9.name = "POLY3"
+        F9.type = "Double"
+        F10 = arcpy.Field()
+        F10.name = "POLY4"
+        F10.type = "Double"
+        F11 = arcpy.Field()
+        F11.name = "POLY5"
+        F11.type = "Double"
+
+        # To avoid chicken and egg scenario of asking for route ID from route layer but route layer has yet to exist we need user
+        # to select the centreline layer as that does exist with the ID. So a new parameter [0] has been added to tool.
+        inFC0 = arcpy.Parameter(
+            displayName = "Input Centerline Feature Class",
+            name = "Input_Centerline",
+            datatype = "GPFeatureLayer",
+            parameterType = "Required",
+            direction = "Input")
+        inFC0.filter.list = ["Polyline"]
+
         #First parameter [0]
         inFC1 = arcpy.Parameter(
             displayName = "Input Routed Centerline Feature Class",
@@ -366,8 +465,30 @@ class CenterlineStations(object):
             datatype="GPFeatureLayer",
             parameterType="Derived",
             direction="Output")
-        
-        params = [inFC1, routeID, inFC2, inDEM, paramOut1]
+        paramOut1.schema.geometryTypeRule="AsSpecified"
+        paramOut1.schema.geometryType = "Point"
+        paramOut1.schema.featureTypeRule="AsSpecified"
+        paramOut1.schema.featureType = "Simple"
+        paramOut1.schema.fieldsRule = "None"
+        paramOut1.schema.additionalFields = [F0, F1, F2, F4, F5, F6, F7,F8 ,F9, F10, F11]
+
+        # Output routes [5]
+        paramOut2 = arcpy.Parameter(
+            displayName="Output cross sections Feature Class",
+            name="out_CrossSections",
+            datatype="GPFeatureLayer",
+            parameterType="Derived",
+            direction="Output")
+        paramOut2.parameterDependencies = [inFC2.name]
+        paramOut2.schema.geometryTypeRule="AsSpecified"
+        paramOut2.schema.geometryType = "Polyline"
+        paramOut2.schema.featureTypeRule="AsSpecified"
+        paramOut2.schema.featureType = "Simple"
+        paramOut2.schema.fieldsRule = "None"
+        paramOut2.schema.additionalFields = [F4, F5, F6, F7,F8 ,F9, F10, F11]
+
+        # Declare parameters
+        params = [inFC0, inFC1, routeID, inFC2, inDEM, paramOut1, paramOut2]
         return params
 
     def isLicensed(self):
@@ -383,7 +504,16 @@ class CenterlineStations(object):
                 with arcpy.da.SearchCursor(parameters[0].valueAsText, 'ROUTEID') as cursor:
                     for row in cursor:
                         if row[0] not in [None, "", "<Null>"]:
-                            parameters[1].value = row[0]
+                            parameters[2].value = row[0]
+                
+                # Set output featureclass name here, required by output schema for modelbuilder
+                fc_in = parameters[0].valueAsText
+                desc = arcpy.Describe(fc_in)
+                gdb = desc.path
+                # Parameter 5 output path
+                stations = "Stations_" + row[0]
+                fc_stations_path = os.path.join(gdb, stations)
+                parameters[5].value = fc_stations_path
         return
 
     def updateMessages(self, parameters):
@@ -394,8 +524,8 @@ class CenterlineStations(object):
             n = int(resObj.getOutput(0))
             if n == 1:
                 parameters[0].clearMessage()
-                if parameters[1].altered == False:
-                     parameters[1].setWarningMessage("Route ID is invalid, must be a non-null value.")
+                if parameters[2].altered == False:
+                     parameters[2].setWarningMessage("Route ID is invalid, must be a non-null value.")
             else:
                  # Report error
                  parameters[0].setErrorMessage("Centreline layer must contain only 1 polyline with a route ID!")
@@ -404,10 +534,10 @@ class CenterlineStations(object):
     def execute(self, parameters, messages):
 
         # Set Local Variables
-        centerroute = parameters[0].valueAsText
-        routeid = parameters[1].valueAsText
-        crosssection = parameters[2].valueAsText
-        raster = parameters[3].valueAsText
+        centerroute = parameters[1].valueAsText
+        routeid = parameters[2].valueAsText
+        crosssection = parameters[3].valueAsText
+        raster = parameters[4].valueAsText
         table_name = "GGL_Table_" + routeid
         stations = "Stations_" + routeid
         inFeatures = [centerroute, crosssection]
@@ -497,11 +627,18 @@ class CenterlineStations(object):
         arcpy.management.JoinField(stations, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
         arcpy.management.JoinField(crosssection, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
 
+        # Delete redundant FID fields
+        arcpy.AddMessage("... Deleting redundant FID fields")
+        fn1 = "FID_Routed_" + routeid
+        fn2 = "FID_CrossSections_" + routeid
+        fn3 = "ORIG_FID"
+        arcpy.DeleteField_management(stations, [fn1, fn2, fn3], "DELETE_FIELDS")
+
         # Add Layers
         arcpy.env.addOutputsToMap = True
         arcpy.AddMessage("... Adding Stations to map")
         fc_stations_path = os.path.join(gdb, stations)
-        parameters[4].value = fc_stations_path
+        parameters[5].value = fc_stations_path
         return
 
 # 24/1/25 - Input parameters for cross section now filters for polyline, DEM filters for a wider range of raster formats
