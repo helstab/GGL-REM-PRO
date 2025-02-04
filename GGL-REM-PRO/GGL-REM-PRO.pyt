@@ -40,6 +40,7 @@ class Toolbox(object):
 # 24/1/25 - Now validates table name against workspace
 # 24/1/25 - Removed parameter for project location as it is never used in any of the code!
 # 24/1/25 - Created an output parameter and output is passed into that, allows modelbuilder connectivity.
+# 4/2/25  - Added PauseDrawing
 class Centerline(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -107,19 +108,19 @@ class Centerline(object):
             arcpy.env.overwriteOutput = True
             arcpy.env.addOutputsToMap = False
             arcpy.env.workspace = gdb
-            
-            # Validate table name
-            cl_name2 = arcpy.ValidateTableName(cl_name, gdb)
-            if cl_name != cl_name2:
-                arcpy.AddWarning("Supplied table name was invalid and has been corrected to: " + cl_name2)
+            with arcpy.PauseDrawing():
+                # Validate table name
+                cl_name2 = arcpy.ValidateTableName(cl_name, gdb)
+                if cl_name != cl_name2:
+                    arcpy.AddWarning("Supplied table name was invalid and has been corrected to: " + cl_name2)
 
-            # Create Feature Class
-            arcpy.AddMessage("... Creating Feature Class")
-            arcpy.CreateFeatureclass_management(gdb, cl_name2, "POLYLINE", "", "", "", dem)
+                # Create Feature Class
+                arcpy.AddMessage("... Creating Feature Class")
+                arcpy.CreateFeatureclass_management(gdb, cl_name2, "POLYLINE", "", "", "", dem)
 
-            # Add Route ID Field to Feature Class
-            arcpy.AddMessage("... Adding Route ID Field")
-            arcpy.AddField_management(cl_name2, "ROUTEID", "TEXT", None, None, 50)
+                # Add Route ID Field to Feature Class
+                arcpy.AddMessage("... Adding Route ID Field")
+                arcpy.AddField_management(cl_name2, "ROUTEID", "TEXT", None, None, 50)
             
             # Add Layers
             arcpy.AddMessage("... Adding Centerline Layer to map")
@@ -144,6 +145,7 @@ class Centerline(object):
 # 30/1/25 - Delete Temporary Features now correctly deletes Merged table, which has now been made an in-memory dataset
 # 31/1/25 - Removed filter off parameter 1 as now not needed.
 # 1/2/25  - Explicity set schema of output parameters so now works correctly in modelbuilder.
+# 4/2/25  - Added PauseDrawing
 class CrossSections(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -306,49 +308,49 @@ class CrossSections(object):
             arcpy.env.overwriteOutput = True
             arcpy.env.addOutputsToMap = False
             arcpy.env.workspace = gdb
+            with arcpy.PauseDrawing():
+                # Process: Create Routes
+                arcpy.AddMessage("... Creating Routes")
+                arcpy.CreateRoutes_lr(fc_in, route_field, fc_routed, "LENGTH", "", "", draw_dir, "", "", "IGNORE", "INDEX")
 
-            # Process: Create Routes
-            arcpy.AddMessage("... Creating Routes")
-            arcpy.CreateRoutes_lr(fc_in, route_field, fc_routed, "LENGTH", "", "", draw_dir, "", "", "IGNORE", "INDEX")
+                # Create Table
+                arcpy.AddMessage("... Building Offset Table")
+                arcpy.CreateTable_management(gdb, off_table)
 
-            # Create Table
-            arcpy.AddMessage("... Building Offset Table")
-            arcpy.CreateTable_management(gdb, off_table)
+                # Add Fields
+                arcpy.AddMessage("... Adding fields")
+                arcpy.AddFields_management(off_table, [["LOCATION", "LONG"],["OFFSET_LEFT", "LONG"],["OFFSET_RIGHT", "LONG"],[route_field, "TEXT", "", 50]])
 
-            # Add Fields
-            arcpy.AddMessage("... Adding fields")
-            arcpy.AddFields_management(off_table, [["LOCATION", "LONG"],["OFFSET_LEFT", "LONG"],["OFFSET_RIGHT", "LONG"],[route_field, "TEXT", "", 50]])
+                # Extract values from Centerline Polyline and create variable with desired row length
+                arcpy.AddMessage("... Extracting Values")
+                # Round length to integer
+                with arcpy.da.SearchCursor(fc_routed, "SHAPE@LENGTH") as cursor:
+                    for row in cursor:
+                        LENGTH = int(row[0])
+                        
+                # Append Extracted Values to Offset_Table
+                arcpy.AddMessage("... Populating Offset Table")
+                fields = ["LOCATION", "OFFSET_LEFT", "OFFSET_RIGHT", route_field]
+                with arcpy.da.InsertCursor(off_table, fields) as cursor:
+                    for x in range(1, LENGTH):
+                        cursor.insertRow((x, o_left, o_right, route_id))
 
-            # Extract values from Centerline Polyline and create variable with desired row length
-            arcpy.AddMessage("... Extracting Values")
-            # Round length to integer
-            with arcpy.da.SearchCursor(fc_routed, "SHAPE@LENGTH") as cursor:
-                for row in cursor:
-                    LENGTH = int(row[0])
-                    
-            # Append Extracted Values to Offset_Table
-            arcpy.AddMessage("... Populating Offset Table")
-            fields = ["LOCATION", "OFFSET_LEFT", "OFFSET_RIGHT", route_field]
-            with arcpy.da.InsertCursor(off_table, fields) as cursor:
-                for x in range(1, LENGTH):
-                    cursor.insertRow((x, o_left, o_right, route_id))
+                # Process: Make Route Event Layers Left and Right
+                arcpy.AddMessage("... Creating Offset Stations")
+                arcpy.MakeRouteEventLayer_lr(fc_routed,"ROUTEID",off_table,"ROUTEID POINT LOCATION", "leftoff", "OFFSET_LEFT","NO_ERROR_FIELD","NO_ANGLE_FIELD","NORMAL","ANGLE","LEFT","POINT")
+                arcpy.MakeRouteEventLayer_lr(fc_routed,"ROUTEID",off_table,"ROUTEID POINT LOCATION", "rightoff", "OFFSET_RIGHT","NO_ERROR_FIELD","NO_ANGLE_FIELD","NORMAL","ANGLE","RIGHT","POINT")
 
-            # Process: Make Route Event Layers Left and Right
-            arcpy.AddMessage("... Creating Offset Stations")
-            arcpy.MakeRouteEventLayer_lr(fc_routed,"ROUTEID",off_table,"ROUTEID POINT LOCATION", "leftoff", "OFFSET_LEFT","NO_ERROR_FIELD","NO_ANGLE_FIELD","NORMAL","ANGLE","LEFT","POINT")
-            arcpy.MakeRouteEventLayer_lr(fc_routed,"ROUTEID",off_table,"ROUTEID POINT LOCATION", "rightoff", "OFFSET_RIGHT","NO_ERROR_FIELD","NO_ANGLE_FIELD","NORMAL","ANGLE","RIGHT","POINT")
+                # Merge Offset Routes
+                arcpy.AddMessage("... Merging Offsets")
+                arcpy.management.Merge(["leftoff","rightoff"], merged, "")
 
-            # Merge Offset Routes
-            arcpy.AddMessage("... Merging Offsets")
-            arcpy.management.Merge(["leftoff","rightoff"], merged, "")
+                # Convert Points to Lines
+                arcpy.AddMessage("... Converting Offset Points to Cross Sections")
+                arcpy.PointsToLine_management(merged, x_sec, "LOCATION", "LOCATION")
 
-            # Convert Points to Lines
-            arcpy.AddMessage("... Converting Offset Points to Cross Sections")
-            arcpy.PointsToLine_management(merged, x_sec, "LOCATION", "LOCATION")
-
-            # Delete Temporary Features
-            arcpy.AddMessage("... Deleting temporary datasets")
-            arcpy.Delete_management([merged, "leftoff", "rightoff"])
+                # Delete Temporary Features
+                arcpy.AddMessage("... Deleting temporary datasets")
+                arcpy.Delete_management([merged, "leftoff", "rightoff"])
 
             # Add Layers to Map
             arcpy.env.addOutputsToMap = True
@@ -373,6 +375,7 @@ class CrossSections(object):
 # 2/2/25  - Explicity set schema of output parameter so now works correctly in modelbuilder.
 # 2/2/25  - Exposes cross sections as output parameter to allow modelbuilder continuity
 # 2/2/25  - Add centreline layer as a parameter to the tool to avoid chicken & egg scenario within modelbuilder.
+# 4/2/25  - Added PauseDrawing
 class CenterlineStations(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -557,88 +560,88 @@ class CenterlineStations(object):
             arcpy.env.overwriteOutput = True
             arcpy.env.addOutputsToMap = False
             arcpy.env.workspace = gdb
+            with arcpy.PauseDrawing():
+                # Create cross station points from intersection of route with cross sections
+                arcpy.AddMessage("... Intersecting Centerline and Cross Section Polylines")
+                arcpy.analysis.PairwiseIntersect(inFeatures, "memory/xsec", "", "", "POINT")
+                arcpy.AddMessage("... Exploding into single part geometry")
+                arcpy.MultipartToSinglepart_management("memory/xsec", "memory/xsec2")
 
-            # Create cross station points from intersection of route with cross sections
-            arcpy.AddMessage("... Intersecting Centerline and Cross Section Polylines")
-            arcpy.analysis.PairwiseIntersect(inFeatures, "memory/xsec", "", "", "POINT")
-            arcpy.AddMessage("... Exploding into single part geometry")
-            arcpy.MultipartToSinglepart_management("memory/xsec", "memory/xsec2")
+                # Extract elevation data from DEM to Centerline Station Points
+                arcpy.AddMessage("... Extracting Elevation Values")
+                arcpy.sa.ExtractValuesToPoints("memory/xsec2", raster, stations, "INTERPOLATE")
 
-            # Extract elevation data from DEM to Centerline Station Points
-            arcpy.AddMessage("... Extracting Elevation Values")
-            arcpy.sa.ExtractValuesToPoints("memory/xsec2", raster, stations, "INTERPOLATE")
+                # Kill off in-memory layers
+                arcpy.AddMessage("... Deleting in-memory layers")
+                arcpy.Delete_management(["memory/xsec", "memory/xsec2"])
 
-            # Kill off in-memory layers
-            arcpy.AddMessage("... Deleting in-memory layers")
-            arcpy.Delete_management(["memory/xsec", "memory/xsec2"])
+                arcpy.AddMessage("... Building GGL")
+                px = list()
+                py = list()
+                with arcpy.da.SearchCursor(stations, ["LOCATION", "RASTERVALU"]) as cursor:
+                    for row in cursor:
+                        px.append(row[0])
+                        py.append(row[1])
 
-            arcpy.AddMessage("... Building GGL")
-            px = list()
-            py = list()
-            with arcpy.da.SearchCursor(stations, ["LOCATION", "RASTERVALU"]) as cursor:
-                for row in cursor:
-                    px.append(row[0])
-                    py.append(row[1])
+                # Linear Model
+                arcpy.AddMessage("... LINEAR")
+                polyfit_1 = np.polyfit(px, py, 1)
+                p1 = np.polyval(polyfit_1, px)
 
-            # Linear Model
-            arcpy.AddMessage("... LINEAR")
-            polyfit_1 = np.polyfit(px, py, 1)
-            p1 = np.polyval(polyfit_1, px)
+                # Second Order
+                arcpy.AddMessage("... QUADRATIC")
+                polyfit_2 = np.polyfit(px, py, 2)
+                p2 = np.polyval(polyfit_2, px)
 
-            # Second Order
-            arcpy.AddMessage("... QUADRATIC")
-            polyfit_2 = np.polyfit(px, py, 2)
-            p2 = np.polyval(polyfit_2, px)
+                # Third Order
+                arcpy.AddMessage("... THIRD ORDER POLY")
+                polyfit_3 = np.polyfit(px, py, 3)
+                p3 = np.polyval(polyfit_3, px)
 
-            # Third Order
-            arcpy.AddMessage("... THIRD ORDER POLY")
-            polyfit_3 = np.polyfit(px, py, 3)
-            p3 = np.polyval(polyfit_3, px)
+                # Fourth Order
+                arcpy.AddMessage("... FOURTH ORDER POLY")
+                polyfit_4= np.polyfit(px, py, 4)
+                p4 = np.polyval(polyfit_4, px)
 
-            # Fourth Order
-            arcpy.AddMessage("... FOURTH ORDER POLY")
-            polyfit_4= np.polyfit(px, py, 4)
-            p4 = np.polyval(polyfit_4, px)
+                # Fifth Order
+                arcpy.AddMessage("... FIFTH ORDER POLY")
+                polyfit_5= np.polyfit(px, py, 5)
+                p5 = np.polyval(polyfit_5, px)
 
-            # Fifth Order
-            arcpy.AddMessage("... FIFTH ORDER POLY")
-            polyfit_5= np.polyfit(px, py, 5)
-            p5 = np.polyval(polyfit_5, px)
+                # Build Structured Array
+                # Set Data Types
+                arcpy.AddMessage("... Building numpy array")
+                dt = {'names':['LOCATION','LIDAR', 'LINEAR', 'POLY2', 'POLY3', 'POLY4', 'POLY5'], 'formats':[np.int64, np.float32, np.float32, np.float32, np.float32, np.float32, np.float32]}
 
-            # Build Structured Array
-            # Set Data Types
-            arcpy.AddMessage("... Building numpy array")
-            dt = {'names':['LOCATION','LIDAR', 'LINEAR', 'POLY2', 'POLY3', 'POLY4', 'POLY5'], 'formats':[np.int64, np.float32, np.float32, np.float32, np.float32, np.float32, np.float32]}
+                # Build Blank Structured Array
+                poly = np.zeros(len(px), dtype=dt)
 
-            # Build Blank Structured Array
-            poly = np.zeros(len(px), dtype=dt)
+                # Add values to Structured Array
+                poly['LOCATION'] = px
+                poly['LIDAR'] = py
+                poly['LINEAR'] = p1
+                poly['POLY2'] = p2
+                poly['POLY3'] = p3
+                poly['POLY4'] = p4
+                poly['POLY5'] = p5
 
-            # Add values to Structured Array
-            poly['LOCATION'] = px
-            poly['LIDAR'] = py
-            poly['LINEAR'] = p1
-            poly['POLY2'] = p2
-            poly['POLY3'] = p3
-            poly['POLY4'] = p4
-            poly['POLY5'] = p5
+                # Convert Structured Array to Table
+                if arcpy.Exists(out_table):
+                    arcpy.Delete_management(out_table)
+                arcpy.da.NumPyArrayToTable(poly, out_table)
+                arcpy.TableToTable_conversion(out_table, dir_loc, csv)
 
-            # Convert Structured Array to Table
-            if arcpy.Exists(out_table):
-                arcpy.Delete_management(out_table)
-            arcpy.da.NumPyArrayToTable(poly, out_table)
-            arcpy.TableToTable_conversion(out_table, dir_loc, csv)
+                # Join Model Output to Cross Sections and Centerline Stations Feature Classes
+                arcpy.AddMessage("... Joining Modeled Values to Features")
+                arcpy.management.JoinField(stations, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
+                arcpy.management.JoinField(crosssection, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
 
-            # Join Model Output to Cross Sections and Centerline Stations Feature Classes
-            arcpy.AddMessage("... Joining Modeled Values to Features")
-            arcpy.management.JoinField(stations, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
-            arcpy.management.JoinField(crosssection, "LOCATION", out_table, "LOCATION", "LIDAR;LINEAR;POLY2;POLY3;POLY4;POLY5", "NOT_USE_FM", None, "NEW_INDEXES")
-
-            # Delete redundant FID fields
-            arcpy.AddMessage("... Deleting redundant FID fields")
-            fn1 = "FID_Routed_" + routeid
-            fn2 = "FID_CrossSections_" + routeid
-            fn3 = "ORIG_FID"
-            arcpy.DeleteField_management(stations, [fn1, fn2, fn3], "DELETE_FIELDS")
+                # Delete redundant FID fields
+                arcpy.AddMessage("... Deleting redundant FID fields")
+                fn1 = "FID_Routed_" + routeid
+                fn2 = "FID_CrossSections_" + routeid
+                fn3 = "ORIG_FID"
+                arcpy.DeleteField_management(stations, [fn1, fn2, fn3], "DELETE_FIELDS")
 
             # Add Layers
             arcpy.env.addOutputsToMap = True
@@ -655,6 +658,7 @@ class CenterlineStations(object):
 # 24/1/25 - Better filtering of parameters
 # 24/1/25 - Created output parameter and dropped requirement for map object, allows modelbuilder connectivity.
 # 31/1/25 - Output parameter now returns multiple outputs if user has selected multiple models.
+# 4/2/25  - Added PauseDrawing and sets processing extent to cross section extent
 class REM(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -756,57 +760,71 @@ class REM(object):
             lidar = parameters[5].valueAsText
             desc = arcpy.Describe(crosssections)
             gdb = desc.path
-
+            ext = desc.extent
+            
             # Set environment
             arcpy.env.addOutputsToMap = False
             arcpy.env.workspace = gdb
             arcpy.env.overwriteOutput = True
+            arcpy.env.snapRaster = lidar
+            arcpy.env.extent = ext
 
-            # REM in Float Meters
-            lstResults = list()
-            if "Custom" in detrend:
-                    arcpy.AddMessage("Building Cutom GGLREM")
-                    arcpy.CopyRows_management(ggl_table, "ggl_table_custom")
-                    arcpy.JoinField_management(crosssections, "LOCATION", "ggl_table_custom", "LOCATION", ggl_field)
-                    arcpy.PolylineToRaster_conversion(crosssections, ggl_field, gglrem_name + "_GGL_RASTER_Custom", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Custom", gglrem_name + "_GGL_REM_Custom")
-                    fc_Custom_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Custom_m")
-                    lstResults.append(fc_Custom_Float_m_path)
+            with arcpy.PauseDrawing():
+                # REM in Float Meters
+                lstResults = list()
+                if "Custom" in detrend:
+                        arcpy.AddMessage("Building Cutom GGLREM")
+                        arcpy.CopyRows_management(ggl_table, "ggl_table_custom")
+                        arcpy.JoinField_management(crosssections, "LOCATION", "ggl_table_custom", "LOCATION", ggl_field)
+                        arcpy.PolylineToRaster_conversion(crosssections, ggl_field, gglrem_name + "_GGL_RASTER_Custom", "", "", "1")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Custom", gglrem_name + "_GGL_REM_Custom")
+                        fc_Custom_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Custom_m")
+                        lstResults.append(fc_Custom_Float_m_path)
 
-            if "Linear Model" in detrend:
-                    arcpy.AddMessage("Building Linear GGLREM")
-                    arcpy.PolylineToRaster_conversion(crosssections, "LINEAR", gglrem_name + "_GGL_RASTER_Linear", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Linear", gglrem_name + "_GGL_REM_Linear")
-                    fc_LINEAR_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Linear")
-                    lstResults.append(fc_LINEAR_path)
+                if "Linear Model" in detrend:
+                        arcpy.AddMessage("Building Linear GGLREM")
+                        arcpy.AddMessage("... Converting cross sections into raster")
+                        arcpy.PolylineToRaster_conversion(crosssections, "LINEAR", gglrem_name + "_GGL_RASTER_Linear", "", "", "1")
+                        arcpy.AddMessage("... Creating REM")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Linear", gglrem_name + "_GGL_REM_Linear")
+                        fc_LINEAR_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Linear")
+                        lstResults.append(fc_LINEAR_path)
 
-            if "Polynomial 2nd" in detrend:
-                    arcpy.AddMessage("Building Quadratic GGLREM")
-                    arcpy.PolylineToRaster_conversion(crosssections, "POLY2", gglrem_name + "_GGL_RASTER_Poly2", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly2", gglrem_name + "_GGL_REM_Poly2")
-                    fc_Poly2_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly2")
-                    lstResults.append(fc_Poly2_Float_m_path)
+                if "Polynomial 2nd" in detrend:
+                        arcpy.AddMessage("Building Quadratic GGLREM")
+                        arcpy.AddMessage("... Converting cross sections into raster")
+                        arcpy.PolylineToRaster_conversion(crosssections, "POLY2", gglrem_name + "_GGL_RASTER_Poly2", "", "", "1")
+                        arcpy.AddMessage("... Creating REM")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly2", gglrem_name + "_GGL_REM_Poly2")
+                        fc_Poly2_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly2")
+                        lstResults.append(fc_Poly2_Float_m_path)
 
-            if "Polynomial 3rd" in detrend:
-                    arcpy.AddMessage("Building 3rd Order Poly GGLREM")
-                    arcpy.PolylineToRaster_conversion(crosssections, "POLY3", gglrem_name + "_GGL_RASTER_Poly3", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly3", gglrem_name + "_GGL_REM_Poly3")
-                    fc_Poly3_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly3")
-                    lstResults.append(fc_Poly3_Float_m_path)
+                if "Polynomial 3rd" in detrend:
+                        arcpy.AddMessage("Building 3rd Order Poly GGLREM")
+                        arcpy.AddMessage("... Converting cross sections into raster")
+                        arcpy.PolylineToRaster_conversion(crosssections, "POLY3", gglrem_name + "_GGL_RASTER_Poly3", "", "", "1")
+                        arcpy.AddMessage("... Creating REM")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly3", gglrem_name + "_GGL_REM_Poly3")
+                        fc_Poly3_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly3")
+                        lstResults.append(fc_Poly3_Float_m_path)
 
-            if "Polynomial 4th" in detrend:
-                    arcpy.AddMessage("Building 4th Order Poly GGLREM")
-                    arcpy.PolylineToRaster_conversion(crosssections, "POLY4", gglrem_name + "_GGL_RASTER_Poly4", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly4", gglrem_name + "_GGL_REM_Poly4")
-                    fc_Poly4_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly4")
-                    lstResults.append(fc_Poly4_Float_m_path)
+                if "Polynomial 4th" in detrend:
+                        arcpy.AddMessage("Building 4th Order Poly GGLREM")
+                        arcpy.AddMessage("... Converting cross sections into raster")
+                        arcpy.PolylineToRaster_conversion(crosssections, "POLY4", gglrem_name + "_GGL_RASTER_Poly4", "", "", "1")
+                        arcpy.AddMessage("... Creating REM")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly4", gglrem_name + "_GGL_REM_Poly4")
+                        fc_Poly4_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly4")
+                        lstResults.append(fc_Poly4_Float_m_path)
 
-            if "Polynomial 5th" in detrend:
-                    arcpy.AddMessage("Building 5th Order Poly GGLREM")
-                    arcpy.PolylineToRaster_conversion(crosssections, "POLY5", gglrem_name + "_GGL_RASTER_Poly5", "", "", "1")
-                    arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly5", gglrem_name + "_GGL_REM_Poly5")
-                    fc_Poly5_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly5")
-                    lstResults.append(fc_Poly5_Float_m_path)
+                if "Polynomial 5th" in detrend:
+                        arcpy.AddMessage("Building 5th Order Poly GGLREM")
+                        arcpy.AddMessage("... Converting cross sections into raster")
+                        arcpy.PolylineToRaster_conversion(crosssections, "POLY5", gglrem_name + "_GGL_RASTER_Poly5", "", "", "1")
+                        arcpy.AddMessage("... Creating REM")
+                        arcpy.Minus_3d(lidar, gglrem_name + "_GGL_RASTER_Poly5", gglrem_name + "_GGL_REM_Poly5")
+                        fc_Poly5_Float_m_path = os.path.join(gdb, gglrem_name + "_GGL_REM_Poly5")
+                        lstResults.append(fc_Poly5_Float_m_path)
             # Set output parameter
             arcpy.env.addOutputsToMap = True
             parameters[6].value = lstResults
